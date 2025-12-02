@@ -222,18 +222,67 @@ async function handleGuess() {
       throw new Error("Introuvable sur Wikipédia");
     }
 
-    // 2. Strict Match Check (Levenshtein)
-    const normalizedGuess = guess.toLowerCase();
-    const normalizedTitle = wikiResult.title.toLowerCase();
+    // 2. Stricter Validation (Word-by-Word)
+    const normalizedGuess = guess.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "").split(/\s+/);
+    const normalizedTitle = wikiResult.title.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "").split(/\s+/);
 
-    // Calculate distance
-    const distance = levenshtein(normalizedGuess, normalizedTitle);
+    // Check if word counts match (or close enough? User said "Nom + Prénom exact")
+    // If user types "Marie" and title is "Marie Curie", we should probably reject if we want "Nom + Prénom".
+    // But user also said "Pseudo si elle en a 1".
+    // Let's check if EVERY word in the guess matches a word in the title with max distance 1.
+    // AND if the number of words is roughly the same?
 
-    // Allow tolerance: <= 3
-    const maxDistance = 3;
+    // Actually, user said: "tape soit le nom + prénom exact ou que le pseudo"
+    // So if title is "Marie Curie", "Marie" is NOT enough.
+    // If title is "Madonna", "Madonna" is enough.
 
-    if (distance > maxDistance) {
-      throw new Error(`Soyez plus précis ! (Vouliez-vous dire "${wikiResult.title}" ?)`);
+    // Strategy:
+    // 1. The number of words must match (or be very close, e.g. ignoring "de", "le"... but let's keep it simple first).
+    // 2. Each word must match with distance <= 1.
+
+    if (normalizedGuess.length !== normalizedTitle.length) {
+      // Special case: maybe user typed "Marie Curie" and title is "Marie Skłodowska-Curie" (3 words vs 2).
+      // Or title has parentheses "Madonna (chanteuse)".
+      // Let's try to match words.
+
+      // If guess has fewer words than title, it might be incomplete.
+      // If guess has more, it might be wrong.
+
+      // Let's be strict on count unless title has parentheses (which we usually strip or ignore).
+      // Wikipedia titles often have disambiguation in parens.
+
+      // Simple approach:
+      // Check if we can map every word of guess to a word of title with dist <= 1.
+      // AND check if we cover 'significant' parts of the title.
+
+      // Given the user's strictness ("Marie Cur" -> No), let's enforce strict word matching.
+
+      // Let's try to match the full string first with a higher tolerance? No, user said "1 lettre en moins ou en plus PAR MOT".
+
+      // So:
+      // 1. Clean title of parentheses " (actrice)".
+      const cleanTitle = wikiResult.title.replace(/\s*\(.*?\)\s*/g, '').toLowerCase();
+      const titleWords = cleanTitle.split(/\s+/);
+
+      if (normalizedGuess.length !== titleWords.length) {
+        throw new Error("Soyez plus précis !"); // No hint
+      }
+
+      // Compare word by word
+      for (let i = 0; i < normalizedGuess.length; i++) {
+        const dist = levenshtein(normalizedGuess[i], titleWords[i]);
+        if (dist > 1) {
+          throw new Error("Orthographe incorrecte.");
+        }
+      }
+    } else {
+      // Same word count, compare word by word
+      for (let i = 0; i < normalizedGuess.length; i++) {
+        const dist = levenshtein(normalizedGuess[i], normalizedTitle[i]);
+        if (dist > 1) {
+          throw new Error("Orthographe incorrecte.");
+        }
+      }
     }
 
     // CHECK DUPLICATES HERE using the REAL title found
@@ -276,7 +325,11 @@ async function handleGuess() {
     }
 
   } catch (error) {
-    showMessage(error.message || "Erreur lors de la recherche", "error");
+    // Generic error message if it's our custom error, or pass through
+    // User said "Ne propose pas de solutions... Juste si c'est juste ou non."
+    // So we keep our custom errors "Soyez plus précis" / "Orthographe incorrecte" / "Déjà trouvé".
+    // But for API errors or "Introuvable", we keep them.
+    showMessage(error.message || "Erreur", "error");
     shakeInput();
   } finally {
     state.isLoading = false;
