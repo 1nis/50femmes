@@ -1,0 +1,26 @@
+version: '3'
+
+services:
+  app-100-femmes:
+    image: app-100-femmes:latest
+    build: .
+    container_name: 100-femmes
+    restart: unless-stopped
+    ports:
+      - "8095:80" # Changed from 8080 to 8095 to avoid conflicts
+    networks:
+      - app_network
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared-tunnel-100-femmes
+    restart: unless-stopped
+    command: tunnel run
+    environment:
+      - TUNNEL_TOKEN={TUNNEL_TOKEN} # Paste your token in Portainer env vars
+    networks:
+      - app_network
+
+networks:
+  app_network:
+    driver: bridge
