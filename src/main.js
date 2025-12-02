@@ -95,6 +95,37 @@ function pad(num) {
   return num.toString().padStart(2, '0');
 }
 
+// Levenshtein Distance for fuzzy matching
+function levenshtein(a, b) {
+  const matrix = [];
+
+  for (let i = 0; i <= b.length; i++) {
+    matrix[i] = [i];
+  }
+
+  for (let j = 0; j <= a.length; j++) {
+    matrix[0][j] = j;
+  }
+
+  for (let i = 1; i <= b.length; i++) {
+    for (let j = 1; j <= a.length; j++) {
+      if (b.charAt(i - 1) === a.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1];
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j - 1] + 1, // substitution
+          Math.min(
+            matrix[i][j - 1] + 1, // insertion
+            matrix[i - 1][j] + 1 // deletion
+          )
+        );
+      }
+    }
+  }
+
+  return matrix[b.length][a.length];
+}
+
 // API Logic
 async function searchWikipedia(query) {
   const endpoint = `https://fr.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&format=json&origin=*`;
@@ -191,24 +222,38 @@ async function handleGuess() {
       throw new Error("Introuvable sur Wikipédia");
     }
 
+    // 2. Strict Match Check (Levenshtein)
+    const normalizedGuess = guess.toLowerCase();
+    const normalizedTitle = wikiResult.title.toLowerCase();
+
+    // Calculate distance
+    const distance = levenshtein(normalizedGuess, normalizedTitle);
+
+    // Allow tolerance: <= 3
+    const maxDistance = 3;
+
+    if (distance > maxDistance) {
+      throw new Error(`Soyez plus précis ! (Vouliez-vous dire "${wikiResult.title}" ?)`);
+    }
+
     // CHECK DUPLICATES HERE using the REAL title found
     if (state.foundWomen.some(w => w.name.toLowerCase() === wikiResult.title.toLowerCase())) {
       throw new Error("Déjà trouvé !");
     }
 
-    // 2. Get Wikidata ID
+    // 3. Get Wikidata ID
     const qId = await getWikidataId(wikiResult.pageid);
     if (!qId) {
       throw new Error("Pas de données Wikidata");
     }
 
-    // 3. Validate Gender
+    // 4. Validate Gender
     const isWoman = await validateWoman(qId);
     if (!isWoman) {
       throw new Error("Ce n'est pas une femme (selon Wikidata)");
     }
 
-    // 4. Get Category (Real Occupation)
+    // 5. Get Category (Real Occupation)
     const category = await getOccupation(qId);
 
     // Success
